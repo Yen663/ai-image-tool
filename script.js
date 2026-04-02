@@ -16,19 +16,21 @@ goBtn.onclick = async () => {
 
   try {
     const cfg = parseAll(prompt);
-    status.textContent = `目标：${cfg.kb}KB | ${cfg.format} | ${cfg.sizeLabel}`;
+
+    // ⭐ 原始格式
+    const originalMime = file.type || 'image/jpeg';
+
+    status.textContent = `目标：${cfg.kb}KB | ${cfg.format || '原格式'} | ${cfg.sizeLabel}`;
 
     const img = await loadImage(file);
 
-    // ⭐ 裁剪 + 尺寸
     const { width, height } = getTargetSize(cfg.size, img.width, img.height);
     let canvas = cropAndResize(img, width, height);
 
-    // ⭐ 极限压缩
     status.textContent = '极限压缩中...';
-    const blob = await extremeCompress(canvas, cfg);
+    const blob = await extremeCompress(canvas, cfg, originalMime);
 
-    showResult(blob, cfg);
+    showResult(blob, cfg, originalMime);
     status.textContent = `✅ 完成 ${(blob.size / 1024).toFixed(1)}KB`;
 
   } catch (e) {
@@ -39,23 +41,19 @@ goBtn.onclick = async () => {
 };
 
 //////////////////////////////////////////////////
-// 指令解析（增强版）
+// 指令解析（严格按用户指令）
 //////////////////////////////////////////////////
 function parseAll(text) {
   text = text.toLowerCase();
 
-  // KB
   const kb = Math.max(10, parseInt(text.match(/(\d+)\s*kb/)?.[1] || 20));
 
-  // 格式
-  let format = 'jpg';
+  // ⭐ 只有用户写了才生效
+  let format = null;
   if (/png/.test(text)) format = 'png';
   else if (/webp/.test(text)) format = 'webp';
+  else if (/jpg|jpeg/.test(text)) format = 'jpg';
 
-  // ⭐ PNG在小体积时自动转JPG（关键）
-  if (format === 'png' && kb < 100) format = 'jpg';
-
-  // 尺寸
   let size = 'original';
   let sizeLabel = '原图';
 
@@ -69,10 +67,7 @@ function parseAll(text) {
     size = '2';
     sizeLabel = '二寸(413×579)';
   } else {
-    // ⭐ 超强尺寸解析（支持 px/xp/像素/乘）
-    const m = text.match(
-      /(\d+)\s*(px|xp|像素)?\s*[x×*乘]\s*(\d+)\s*(px|xp|像素)?/
-    );
+    const m = text.match(/(\d+)\s*(px|xp|像素)?\s*[x×*乘]\s*(\d+)\s*(px|xp|像素)?/);
     if (m) {
       size = { w: +m[1], h: +m[3] };
       sizeLabel = `${m[1]}×${m[3]}`;
@@ -83,13 +78,7 @@ function parseAll(text) {
     kb,
     format,
     size,
-    sizeLabel,
-    mime:
-      format === 'png'
-        ? 'image/png'
-        : format === 'webp'
-        ? 'image/webp'
-        : 'image/jpeg'
+    sizeLabel
   };
 }
 
@@ -105,7 +94,7 @@ function getTargetSize(size, ow, oh) {
 }
 
 //////////////////////////////////////////////////
-// ⭐ 等比例裁剪
+// 等比例裁剪
 //////////////////////////////////////////////////
 function cropAndResize(img, targetW, targetH) {
   const canvas = document.createElement('canvas');
@@ -137,28 +126,35 @@ function cropAndResize(img, targetW, targetH) {
 }
 
 //////////////////////////////////////////////////
-// ⭐⭐⭐ 极限压缩算法（核心）
+// ⭐ 极限压缩（严格按格式）
 //////////////////////////////////////////////////
-async function extremeCompress(canvas, cfg) {
+async function extremeCompress(canvas, cfg, originalMime) {
   const target = cfg.kb * 1024;
 
-  // 第一次压缩（质量）
-  let blob = await binarySearchCompress(canvas, cfg.mime, target);
+  const mime = cfg.format
+    ? (cfg.format === 'png'
+        ? 'image/png'
+        : cfg.format === 'webp'
+        ? 'image/webp'
+        : 'image/jpeg')
+    : originalMime;
 
-  // ⭐ 根据体积差，直接计算缩放比例（关键）
+  let blob = await binarySearchCompress(canvas, mime, target);
+
+  // ⭐ 根据比例直接缩放
   let ratio = Math.sqrt(target / blob.size);
 
   if (ratio < 0.95) {
     canvas = scaleCanvas(canvas, ratio);
-    blob = await binarySearchCompress(canvas, cfg.mime, target);
+    blob = await binarySearchCompress(canvas, mime, target);
   }
 
-  // ⭐ 多轮逼近（兜底）
+  // ⭐ 兜底
   for (let i = 0; i < 6; i++) {
     if (blob.size <= target) return blob;
 
     canvas = scaleCanvas(canvas, 0.7);
-    blob = await binarySearchCompress(canvas, cfg.mime, target);
+    blob = await binarySearchCompress(canvas, mime, target);
   }
 
   return blob;
@@ -182,7 +178,7 @@ async function binarySearchCompress(canvas, mime, target) {
     }
   }
 
-  return best || (await toBlob(canvas, mime, 0.05));
+  return best || await toBlob(canvas, mime, 0.05);
 }
 
 //////////////////////////////////////////////////
@@ -201,11 +197,11 @@ function scaleCanvas(canvas, ratio) {
 }
 
 function toBlob(canvas, mime, q) {
-  return new Promise((resolve) => canvas.toBlob(resolve, mime, q));
+  return new Promise(resolve => canvas.toBlob(resolve, mime, q));
 }
 
 //////////////////////////////////////////////////
-// 图片加载
+// 加载图片
 //////////////////////////////////////////////////
 function loadImage(file) {
   return new Promise((res, rej) => {
@@ -219,12 +215,16 @@ function loadImage(file) {
 //////////////////////////////////////////////////
 // 下载
 //////////////////////////////////////////////////
-function showResult(blob, cfg) {
+function showResult(blob, cfg, originalMime) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `output.${cfg.format}`;
-  a.textContent = `📥 下载 (${cfg.format.toUpperCase()})`;
+
+  const ext = cfg.format || originalMime.split('/')[1];
+  a.download = `output.${ext}`;
+
+  a.textContent = `📥 下载 (${ext.toUpperCase()})`;
   a.style.cssText =
     'display:inline-block;padding:12px 20px;background:#05c46b;color:#fff;border-radius:8px;text-decoration:none;';
+
   result.appendChild(a);
 }
