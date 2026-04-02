@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AI智能改图 · 一句话压缩</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="card">
+  <h1>📸 AI智能改图</h1>
+  <p class="sub">上传图片 + 一句话指令，自动压缩/转格式/控KB</p>
+
+  <div class="upload-box">
+    <input type="file" id="file" accept="image/*">
+  </div>
+
+  <textarea id="prompt" placeholder="例如：压缩到18KB，尺寸不变，转JPG"></textarea>
+
+  <button id="go">🚀 AI一键处理</button>
+
+  <div id="status"></div>
+  <div id="result"></div>
+</div>
+<script src="script.js"></script>
+</body>
+</html>
